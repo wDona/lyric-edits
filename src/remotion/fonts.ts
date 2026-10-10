@@ -53,15 +53,20 @@ export function fontCss(id: string): CSSProperties {
 }
 
 /** Resolves once every font above is really in (document.fonts can answer before Remotion has even added them). */
-export const fontsLoaded = () => Promise.all(loads.map((l) => l.waitUntilDone()));
+let ready = false;
+export const fontsLoaded = () => Promise.all(loads.map((l) => l.waitUntilDone())).then(() => void (ready = true));
 
 let probe: HTMLSpanElement | null = null;
 /**
  * Width of `text` at 100px in a font, laid out by the DOM. Not canvas: the render's headless Chrome
- * measures canvas text with the fallback font even once the web font is in. Not cached: the first
- * frames measure before the font has loaded.
+ * measures canvas text with the fallback font even once the web font is in. Cached only once the
+ * fonts are in: earlier frames measure the fallback.
  */
+const widths = new Map<string, number>(); // only filled once the fonts are in
 export function measure(text: string, id: string) {
+  const key = `${id}|${text}`;
+  const known = widths.get(key);
+  if (known) return known;
   const f = FONTS[id] ?? FONTS.montserrat;
   if (!probe) {
     probe = document.createElement("span");
@@ -70,5 +75,7 @@ export function measure(text: string, id: string) {
   }
   Object.assign(probe.style, { fontFamily: `"${f.family}"`, fontWeight: String(f.weight), fontStyle: f.italic ? "italic" : "normal" });
   probe.textContent = text;
-  return probe.getBoundingClientRect().width || 1;
+  const w = probe.getBoundingClientRect().width || 1; // forces a layout: cached so frames don't pay it again
+  if (ready) widths.set(key, w);
+  return w;
 }

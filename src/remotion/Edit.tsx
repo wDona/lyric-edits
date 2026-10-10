@@ -82,7 +82,11 @@ export function Edit(p: EditProps) {
         <AbsoluteFill
           style={{
             transform: `translate(${dx * 0.6}px, ${dy * 0.6 - bob * 18}px) scale(${(1 + (zoom - 1) * 0.5) * (1 + (cam.s - 1) * 0.35) * (1 + c * 0.35 + bob * 0.04)})`,
-            filter: [rgb > 0.5 && "url(#rgb)", c > 0.02 && `blur(${c * 10}px)`].filter(Boolean).join(" ") || undefined,
+            // RGB split as two colored shadows: SVG channel filters on a full frame stall Firefox
+            filter:
+              [rgb > 0.5 && `drop-shadow(${-rgb}px 0 0 rgba(255,0,60,.85)) drop-shadow(${rgb}px 0 0 rgba(0,220,255,.85))`, c > 0.02 && `blur(${c * 10}px)`]
+                .filter(Boolean)
+                .join(" ") || undefined,
           }}
         >
           {fontsReady && <Template p={lp} gs={run} t={t} beat={beat} />}
@@ -103,26 +107,31 @@ export function Edit(p: EditProps) {
   );
 }
 
+let noiseUrl = "";
+/**
+ * One 256 px tile of grey noise, made once and shifted every frame. A per-frame feTurbulence over
+ * 1080×1920 looks the same but Firefox computes it on the CPU and the editor freezes.
+ */
+function noise() {
+  if (noiseUrl) return noiseUrl;
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const g = c.getContext("2d")!;
+  const img = g.createImageData(256, 256);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.floor(rand(i / 4 + 0.123) * 255);
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return (noiseUrl = c.toDataURL());
+}
+
 function Overlays({ p, frame, beat, hit, rgb, t }: { p: EditProps; frame: number; beat: number; hit: number; rgb: number; t: number }) {
   const { fx } = p.style;
   const a = (t / p.rate) * 0.4;
   return (
     <>
-      <svg width="0" height="0" style={{ position: "absolute" }}>
-        <filter id="rgb" x="-10%" y="-10%" width="120%" height="120%">
-          <feOffset in="SourceGraphic" dx={-rgb} result="r0" />
-          <feColorMatrix in="r0" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="r" />
-          <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="g" />
-          <feOffset in="SourceGraphic" dx={rgb} result="b0" />
-          <feColorMatrix in="b0" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="b" />
-          <feBlend in="r" in2="g" mode="screen" result="rg" />
-          <feBlend in="rg" in2="b" mode="screen" />
-        </filter>
-        <filter id="grain">
-          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed={frame % 97} />
-          <feColorMatrix type="saturate" values="0" />
-        </filter>
-      </svg>
       {fx.leaks > 0 && (
         <AbsoluteFill
           style={{
@@ -139,9 +148,14 @@ function Overlays({ p, frame, beat, hit, rgb, t }: { p: EditProps; frame: number
         <AbsoluteFill style={{ background: `radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,${fx.vignette}) 100%)` }} />
       )}
       {fx.grain > 0 && (
-        <svg width={W} height={H} style={{ position: "absolute", inset: 0, opacity: fx.grain * 0.35, mixBlendMode: "overlay" }}>
-          <rect width="100%" height="100%" filter="url(#grain)" />
-        </svg>
+        <AbsoluteFill
+          style={{
+            backgroundImage: `url(${noise()})`,
+            backgroundPosition: `${Math.floor(rand(frame) * 256)}px ${Math.floor(rand(frame + 0.5) * 256)}px`,
+            opacity: fx.grain * 0.5,
+            mixBlendMode: "overlay",
+          }}
+        />
       )}
       {fx.flash > 0 && <AbsoluteFill style={{ background: "#fff", opacity: fx.flash * 0.7 * Math.pow(beat, 3) * hit * hit }} />}
       {fx.letterbox && (

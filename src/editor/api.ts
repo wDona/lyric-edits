@@ -107,17 +107,28 @@ function peaksOf(a: AudioBuffer) {
   return out.map((v) => v / max);
 }
 
+/** If a step of a load takes over 15 s, say which: console errors reach the dev server's log. */
+async function slow<T>(what: string, work: Promise<T>): Promise<T> {
+  const t0 = performance.now();
+  const timer = setInterval(() => console.error(`[lyric-edits] carga lenta: ${what} lleva ${Math.round((performance.now() - t0) / 1000)} s`), 15_000);
+  try {
+    return await work;
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 export async function loadSong(key: string): Promise<Song> {
-  const s = await req<any>(`/api/song/${key}`);
+  const s = await slow(`pidiendo ${key}`, req<any>(`/api/song/${key}`));
   const lines = fromLetras(s.doc);
   let peaks = new Float32Array();
   let env: number[] = [];
   let duration = lines.length ? lines[lines.length - 1].end + 5 : 60;
   if (s.audio) {
-    const mix = await decode(s.audio);
+    const mix = await slow(`decodificando ${s.audio}`, decode(s.audio));
     duration = mix.duration;
     peaks = peaksOf(mix);
-    env = envelope(s.drums ? await decode(s.drums) : mix);
+    env = envelope(s.drums ? await slow(`decodificando ${s.drums}`, decode(s.drums)) : mix);
   }
   return {
     key,
